@@ -1,0 +1,96 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --eval \"db.adminCommand({ ping: 1 }).ok\" | grep 1 >/dev/null"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+    image: bot-keuangan:latest
+    command: ["node", "src/api/server.js"]
+    restart: unless-stopped
+    env_file:
+      - .env.vps
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/bot-keuangan
+      WHATSAPP_ADAPTER_BASE_URL: http://bot:3100
+      PORT: 3000
+      LOG_TO_FILE: "false"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  bot:
+    image: bot-keuangan:latest
+    command: ["node", "src/adapters/whatsapp/server.js"]
+    restart: unless-stopped
+    env_file:
+      - .env.vps
+    environment:
+      WHATSAPP_API_BASE_URL: http://api:3000/api/v1
+      WHATSAPP_ADAPTER_PORT: 3100
+      LOG_TO_FILE: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - auth_data:/app/auth
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3100/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  scheduler:
+    image: bot-keuangan:latest
+    command: ["node", "src/scheduler/worker.js"]
+    restart: unless-stopped
+    env_file:
+      - .env.vps
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/bot-keuangan
+      WHATSAPP_ADAPTER_BASE_URL: http://bot:3100
+      LOG_TO_FILE: "false"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      bot:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  auth_data:
+

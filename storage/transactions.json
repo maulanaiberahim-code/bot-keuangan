@@ -1,0 +1,53 @@
+{
+  "users": {
+    "1855962796208": {
+      "balance": 2970000,
+      "transactions": [
+        {
+          "id": 1,
+          "type": "income",
+          "amount": 3000000,
+          "category": "gaji",
+          "createdAt": "2026-04-03T16:06:44.999Z"
+        },
+        {
+          "id": 2,
+          "type": "expense",
+          "amount": 20000,
+          "category": "kebab",
+          "createdAt": "2026-04-03T16:07:41.331Z"
+        },
+        {
+          "id": 3,
+          "type": "expense",
+          "amount": 10000,
+          "category": "kopi",
+          "createdAt": "2026-04-03T16:08:02.233Z"
+        }
+      ],
+      "pendingReset": false,
+      "sequence": 3
+    },
+    "231211058343993": {
+      "balance": 1100,
+      "transactions": [
+        {
+          "id": 1,
+          "type": "income",
+          "amount": 100,
+          "category": "gaji",
+          "createdAt": "2026-04-03T16:08:24.742Z"
+        },
+        {
+          "id": 2,
+          "type": "income",
+          "amount": 1000,
+          "category": "gaji",
+          "createdAt": "2026-04-03T16:08:34.932Z"
+        }
+      ],
+      "pendingReset": false,
+      "sequence": 2
+    }
+  }
+}

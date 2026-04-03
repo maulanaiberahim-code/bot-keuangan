@@ -1,0 +1,10 @@
+{
+  "users": {
+    "628111111111": {
+      "balance": 0,
+      "transactions": [],
+      "pendingReset": false,
+      "sequence": 0
+    }
+  }
+}
