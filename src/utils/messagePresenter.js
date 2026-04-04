@@ -2,40 +2,51 @@ const { formatCurrency, formatDate } = require("./formatter");
 
 function buildHelpMessage() {
   return [
-    "Daftar command yang tersedia:",
-    "- help",
-    "- masuk <nominal> <kategori>",
-    "- keluar <nominal> <kategori>",
+    "Hai, aku CatatDuit 👋",
+    "Coba kirim salah satu format ini ya:",
+    "",
+    "Catat transaksi",
+    "- masuk 50000 gaji",
+    "- keluar 20000 makan",
+    "",
+    "Cek catatan",
     "- saldo",
     "- riwayat",
     "- riwayat hari ini",
     "- riwayat bulan ini",
-    "- riwayat kategori <nama-kategori>",
+    "- riwayat kategori makan",
     "- laporan bulan ini",
-    "- laporan YYYY-MM",
-    "- reset",
-    '- "ya reset"',
-    '- "batal reset"',
+    "- laporan 2026-04",
     "",
-    "Command admin:",
+    "Reset data",
+    "- reset",
+    "- ya reset",
+    "- batal reset",
+    "",
+    "Menu admin",
     "- admin stats",
-    "- admin stats YYYY-MM",
+    "- admin stats 2026-04",
     "- admin kategori",
-    "- admin kategori YYYY-MM",
+    "- admin kategori 2026-04",
     "- admin user aktif",
-    "- admin user aktif YYYY-MM"
+    "- admin user aktif 2026-04"
   ].join("\n");
 }
 
 function formatTransactionCreated(result) {
   const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
+  const intro = result.transaction.type === "income"
+    ? "Sip, pemasukan kamu sudah kecatat ✅"
+    : "Sip, pengeluaran kamu sudah kecatat ✅";
 
   return [
-    `${action} berhasil dicatat.`,
+    intro,
+    `- ${action}: ${formatCurrency(result.transaction.amount)}`,
     `- Kategori: ${result.transaction.category}`,
-    `- Nominal: ${formatCurrency(result.transaction.amount)}`,
     `- Saldo sekarang: ${formatCurrency(result.balance)}`,
-    result.duplicate ? "- Status: request duplikat, transaksi lama digunakan." : null
+    result.duplicate
+      ? "Catatan yang sama sudah pernah masuk, jadi saldo tidak berubah."
+      : "Kalau mau, lanjut cek `saldo` atau `riwayat`."
   ]
     .filter(Boolean)
     .join("\n");
@@ -43,46 +54,50 @@ function formatTransactionCreated(result) {
 
 function formatSummary(summary) {
   return [
-    "Ringkasan saldo:",
-    `- Saldo saat ini: ${formatCurrency(summary.balance)}`,
-    `- Jumlah transaksi bulan ini: ${summary.stats.totalTransactions}`,
-    `- Pemasukan bulan ini: ${formatCurrency(summary.stats.currentMonthIncome)}`,
-    `- Pengeluaran bulan ini: ${formatCurrency(summary.stats.currentMonthExpense)}`
+    "Ini ringkasan uang kamu saat ini 💸",
+    `- Saldo sekarang: ${formatCurrency(summary.balance)}`,
+    `- Transaksi bulan ini: ${summary.stats.totalTransactions}`,
+    `- Total masuk: ${formatCurrency(summary.stats.currentMonthIncome)}`,
+    `- Total keluar: ${formatCurrency(summary.stats.currentMonthExpense)}`,
+    "Mau lanjut cek `riwayat` atau `laporan bulan ini`?"
   ].join("\n");
 }
 
 function formatTransactionHistory(items, meta, filterDescription = "Riwayat transaksi") {
   if (!items.length) {
-    return "Tidak ada transaksi yang cocok dengan filter tersebut.";
+    return [
+      "Belum ada catatan yang cocok.",
+      "Coba cek `riwayat` atau ganti filter ya."
+    ].join("\n");
   }
 
   return [
-    `${filterDescription}:`,
+    `${filterDescription} 👇`,
     ...items.map((transaction) => [
       `- ${transaction.type === "income" ? "Masuk" : "Keluar"} ${formatCurrency(transaction.amount)}`,
       `${transaction.category}`,
       `(${formatDate(transaction.createdAt)})`
     ].join(" | ")),
     "",
-    `Menampilkan ${items.length} dari total ${meta.totalItems} transaksi.`
+    `Ketemu ${items.length} dari total ${meta.totalItems} transaksi.`
   ].join("\n");
 }
 
 function formatMonthlyReport(report) {
   return [
-    `Laporan bulan ${report.month}:`,
-    `- Total pemasukan: ${formatCurrency(report.totals.income)}`,
-    `- Total pengeluaran: ${formatCurrency(report.totals.expense)}`,
+    `Laporan bulan ${report.month} siap ✨`,
+    `- Total masuk: ${formatCurrency(report.totals.income)}`,
+    `- Total keluar: ${formatCurrency(report.totals.expense)}`,
     `- Selisih: ${formatCurrency(report.totals.net)}`,
     `- Total transaksi: ${report.totals.transactionCount}`,
     "",
-    "Pemasukan per kategori:",
-    formatBreakdown(report.incomeBreakdown, "Tidak ada pemasukan."),
+    "Rincian pemasukan:",
+    formatBreakdown(report.incomeBreakdown, "Belum ada pemasukan."),
     "",
-    "Pengeluaran per kategori:",
-    formatBreakdown(report.expenseBreakdown, "Tidak ada pengeluaran."),
+    "Rincian pengeluaran:",
+    formatBreakdown(report.expenseBreakdown, "Belum ada pengeluaran."),
     "",
-    "Insight:",
+    "Highlight bulan ini:",
     `- Pemasukan terbesar: ${formatInsight(report.insights.topIncomeCategory)}`,
     `- Pengeluaran terbesar: ${formatInsight(report.insights.topExpenseCategory)}`
   ].join("\n");
@@ -90,7 +105,7 @@ function formatMonthlyReport(report) {
 
 function formatAdminStats(stats) {
   return [
-    `Global stats bulan ${stats.month}:`,
+    `Ringkasan global bulan ${stats.month}:`,
     `- Total user: ${stats.totals.users}`,
     `- Total admin: ${stats.totals.admins}`,
     `- Total transaksi: ${stats.totals.transactions}`,
@@ -100,11 +115,17 @@ function formatAdminStats(stats) {
 
 function formatTopCategories(result) {
   if (!result.items.length) {
-    return `Tidak ada data kategori untuk ${result.month}.`;
+    return `Belum ada data kategori untuk ${result.month}.`;
   }
 
+  const typeLabel = result.type === "expense"
+    ? "pengeluaran"
+    : result.type === "income"
+      ? "pemasukan"
+      : "transaksi";
+
   return [
-    `Top kategori ${result.type} bulan ${result.month}:`,
+    `Top kategori ${typeLabel} bulan ${result.month}:`,
     ...result.items.map((item, index) => (
       `${index + 1}. ${item.category} - ${formatCurrency(item.amount)} (${item.count} transaksi)`
     ))
@@ -113,7 +134,7 @@ function formatTopCategories(result) {
 
 function formatMostActiveUsers(result) {
   if (!result.items.length) {
-    return `Tidak ada user aktif untuk ${result.month}.`;
+    return `Belum ada user aktif untuk ${result.month}.`;
   }
 
   return [
@@ -131,13 +152,13 @@ function formatResetResponse(result) {
 function formatDailySummary(payload) {
   return [
     `Ringkasan harian ${payload.date}:`,
-    `- Total pemasukan: ${formatCurrency(payload.totals.income)}`,
-    `- Total pengeluaran: ${formatCurrency(payload.totals.expense)}`,
+    `- Total masuk: ${formatCurrency(payload.totals.income)}`,
+    `- Total keluar: ${formatCurrency(payload.totals.expense)}`,
     `- Selisih: ${formatCurrency(payload.totals.net)}`,
     `- Total transaksi: ${payload.totals.transactionCount}`,
     payload.topExpenseCategory
       ? `- Pengeluaran terbesar: ${payload.topExpenseCategory.category} (${formatCurrency(payload.topExpenseCategory.amount)})`
-      : "- Pengeluaran terbesar: tidak ada"
+      : "- Pengeluaran terbesar: belum ada"
   ].join("\n");
 }
 
@@ -153,7 +174,7 @@ function formatBreakdown(items, emptyMessage) {
 
 function formatInsight(item) {
   if (!item) {
-    return "tidak ada";
+    return "belum ada";
   }
 
   return `${item.category} (${formatCurrency(item.amount)})`;

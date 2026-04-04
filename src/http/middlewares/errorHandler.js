@@ -33,7 +33,7 @@ function normalizeError(error) {
 
   if (error instanceof ZodError) {
     return new AppError(
-      "Payload request tidak valid.",
+      "Format inputnya belum sesuai.",
       400,
       "VALIDATION_ERROR",
       {
@@ -45,7 +45,7 @@ function normalizeError(error) {
     );
   }
 
-  return new AppError("Terjadi kesalahan internal.", 500, "INTERNAL_ERROR");
+  return new AppError("Lagi ada kendala di sistem. Coba sebentar lagi ya.", 500, "INTERNAL_ERROR");
 }
 
 module.exports = errorHandler;

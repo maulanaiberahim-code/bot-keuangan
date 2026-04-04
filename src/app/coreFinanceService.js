@@ -19,15 +19,15 @@ class CoreFinanceService {
     const idempotencyKey = input.idempotencyKey || null;
 
     if (!["income", "expense"].includes(type)) {
-      throw new AppError("Type transaksi harus income atau expense.", 400, "INVALID_TRANSACTION_TYPE");
+      throw new AppError("Jenis transaksinya belum pas. Pakai masuk atau keluar ya.", 400, "INVALID_TRANSACTION_TYPE");
     }
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      throw new AppError("Nominal harus berupa angka lebih dari 0.", 400, "INVALID_AMOUNT");
+      throw new AppError("Nominalnya belum valid. Masukkan angka lebih dari 0 ya.", 400, "INVALID_AMOUNT");
     }
 
     if (!category) {
-      throw new AppError("Kategori transaksi wajib diisi.", 400, "CATEGORY_REQUIRED");
+      throw new AppError("Kategorinya jangan kosong ya.", 400, "CATEGORY_REQUIRED");
     }
 
     const user = await this.ensureUserContext({
@@ -132,7 +132,7 @@ class CoreFinanceService {
     const normalizedMonthKey = monthKey || getCurrentMonthKey();
 
     if (!isValidMonthKey(normalizedMonthKey)) {
-      throw new AppError("Format bulan harus YYYY-MM, contoh: 2026-04.", 400, "INVALID_MONTH");
+      throw new AppError("Format bulannya belum pas. Pakai YYYY-MM, misalnya 2026-04.", 400, "INVALID_MONTH");
     }
 
     await this.ensureUserContext({ userId: normalizedUserId, chatId });
@@ -228,7 +228,7 @@ class CoreFinanceService {
 
     return {
       status: "pending_confirmation",
-      message: 'Ketik "ya reset" untuk konfirmasi atau "batal reset" untuk membatalkan.'
+      message: 'Kalau kamu yakin, balas "ya reset". Kalau belum jadi, balas "batal reset".'
     };
   }
 
@@ -239,7 +239,7 @@ class CoreFinanceService {
     if (!user.pendingReset) {
       return {
         status: "noop",
-        message: "Tidak ada reset yang menunggu konfirmasi."
+        message: "Belum ada reset yang menunggu konfirmasi."
       };
     }
 
@@ -248,7 +248,7 @@ class CoreFinanceService {
 
     return {
       status: "completed",
-      message: "Data keuangan berhasil direset."
+      message: "Siap, semua catatan keuanganmu sudah direset."
     };
   }
 
@@ -259,7 +259,7 @@ class CoreFinanceService {
     if (!user.pendingReset) {
       return {
         status: "noop",
-        message: "Tidak ada reset yang perlu dibatalkan."
+        message: "Belum ada reset yang perlu dibatalkan."
       };
     }
 
@@ -267,7 +267,7 @@ class CoreFinanceService {
 
     return {
       status: "cancelled",
-      message: "Reset dibatalkan."
+      message: "Oke, reset dibatalkan."
     };
   }
 
@@ -390,7 +390,7 @@ class CoreFinanceService {
     });
 
     if (user.role !== "admin") {
-      throw new AppError("Akses admin diperlukan.", 403, "FORBIDDEN_ADMIN_ONLY");
+      throw new AppError("Fitur ini khusus admin ya.", 403, "FORBIDDEN_ADMIN_ONLY");
     }
 
     return user;
@@ -461,7 +461,7 @@ class CoreFinanceService {
     const normalizedUserId = this.normalizeUserId(userId);
 
     if (!normalizedUserId) {
-      throw new AppError("userId wajib diisi.", 400, "USER_ID_REQUIRED");
+      throw new AppError("User belum dikenali. Coba kirim pesan lagi ya.", 400, "USER_ID_REQUIRED");
     }
 
     return this.userRepository.upsertContext({

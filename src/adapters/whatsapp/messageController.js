@@ -56,10 +56,13 @@ class WhatsAppMessageController {
       });
 
       if (error instanceof AppError) {
-        return `Terjadi kesalahan: ${error.message}`;
+        return [
+          `Ups, ${error.message}`,
+          "Coba cek format pesanmu lalu kirim lagi ya."
+        ].join("\n");
       }
 
-      return "Terjadi kesalahan internal.";
+      return "Lagi ada kendala di sistem. Coba sebentar lagi ya 🙏";
     }
   }
 
@@ -203,7 +206,12 @@ class WhatsAppMessageController {
         return formatMostActiveUsers(result);
       }
       default:
-        return ["Perintah tidak dikenali.", "", buildHelpMessage()].join("\n");
+        return [
+          "Aku belum paham format pesan itu 🙏",
+          "Coba pakai salah satu format di bawah ya:",
+          "",
+          buildHelpMessage()
+        ].join("\n");
     }
   }
 
@@ -225,11 +233,11 @@ class WhatsAppMessageController {
 
 function buildHistoryTitle(filter = {}) {
   if (filter.period === "today") {
-    return "Riwayat transaksi hari ini";
+    return "Riwayat hari ini";
   }
 
   if (filter.period === "month") {
-    return "Riwayat transaksi bulan ini";
+    return "Riwayat bulan ini";
   }
 
   if (filter.category) {
