@@ -34,6 +34,12 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       default: null
     },
+    transactionAt: {
+      type: Date,
+      required: true,
+      default: Date.now,
+      index: true
+    },
     idempotencyKey: {
       type: String,
       default: null
@@ -54,9 +60,9 @@ const transactionSchema = new mongoose.Schema(
   }
 );
 
-transactionSchema.index({ userId: 1, createdAt: -1 });
-transactionSchema.index({ userId: 1, monthKey: 1, createdAt: -1 });
-transactionSchema.index({ userId: 1, dateKey: 1, createdAt: -1 });
+transactionSchema.index({ userId: 1, transactionAt: -1, createdAt: -1 });
+transactionSchema.index({ userId: 1, monthKey: 1, transactionAt: -1, createdAt: -1 });
+transactionSchema.index({ userId: 1, dateKey: 1, transactionAt: -1, createdAt: -1 });
 transactionSchema.index({ userId: 1, category: 1, monthKey: 1 });
 transactionSchema.index({ userId: 1, type: 1, monthKey: 1 });
 transactionSchema.index(

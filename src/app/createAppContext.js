@@ -1,4 +1,5 @@
 const logger = require("../utils/logger");
+const env = require("../config/env");
 const CoreFinanceService = require("./coreFinanceService");
 const { createMetricsRegistry } = require("../metrics/createMetricsRegistry");
 const MongoUserRepository = require("../db/repositories/MongoUserRepository");
@@ -8,11 +9,14 @@ const ExportService = require("../exports/exportService");
 
 function createAppContext(options = {}) {
   const baseLogger = options.logger || logger;
+  const adminUserIds = options.adminUserIds || env.adminUserIds;
   const metricsBundle = options.metricsBundle || createMetricsRegistry({
     service: options.serviceName || "api"
   });
 
-  const userRepository = options.userRepository || new MongoUserRepository();
+  const userRepository = options.userRepository || new MongoUserRepository({
+    adminUserIds
+  });
   const transactionRepository = options.transactionRepository || new MongoTransactionRepository();
   const deliveryJobRepository = options.deliveryJobRepository || new MongoDeliveryJobRepository();
 
@@ -20,7 +24,8 @@ function createAppContext(options = {}) {
     userRepository,
     transactionRepository,
     deliveryJobRepository,
-    logger: baseLogger
+    logger: baseLogger,
+    adminUserIds
   });
 
   const exportService = options.exportService || new ExportService({

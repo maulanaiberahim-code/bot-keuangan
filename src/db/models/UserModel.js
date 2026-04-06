@@ -23,6 +23,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    pendingDeleteTransactionId: {
+      type: String,
+      default: null
+    },
     timezone: {
       type: String,
       default: env.timezone

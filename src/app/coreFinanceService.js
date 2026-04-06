@@ -1,14 +1,15 @@
 const AppError = require("../errors/AppError");
 const env = require("../config/env");
-const { getCurrentDayKey, getCurrentMonthKey, getLocalDateParts, isValidMonthKey } = require("../utils/dateHelper");
+const { getCurrentDayKey, getCurrentMonthKey, getLocalDateParts, isValidDayKey, isValidMonthKey } = require("../utils/dateHelper");
 const { parseAmount } = require("../utils/amount");
 
 class CoreFinanceService {
-  constructor({ userRepository, transactionRepository, deliveryJobRepository, logger }) {
+  constructor({ userRepository, transactionRepository, deliveryJobRepository, logger, adminUserIds = env.adminUserIds }) {
     this.userRepository = userRepository;
     this.transactionRepository = transactionRepository;
     this.deliveryJobRepository = deliveryJobRepository;
     this.logger = logger;
+    this.adminUserIds = new Set(adminUserIds);
   }
 
   async createTransaction(input) {
@@ -30,13 +31,14 @@ class CoreFinanceService {
       throw new AppError("Kategorinya jangan kosong ya.", 400, "CATEGORY_REQUIRED");
     }
 
-    const user = await this.ensureUserContext({
+    const transactionAt = this.resolveTransactionAt(input.transactionDate);
+
+    await this.ensureUserContext({
       userId,
       chatId: input.chatId
     });
 
-    const createdAt = new Date().toISOString();
-    const { dateKey, monthKey } = getLocalDateParts(createdAt);
+    const { dateKey, monthKey } = getLocalDateParts(transactionAt);
 
     const creationResult = await this.transactionRepository.createOrGetTransaction({
       userId,
@@ -46,40 +48,46 @@ class CoreFinanceService {
       source: input.source || "api",
       chatId: input.chatId || null,
       correlationId: input.correlationId || null,
+      transactionAt,
       idempotencyKey,
       dateKey,
-      monthKey,
-      createdAt
+      monthKey
     });
 
-    if (creationResult.duplicate) {
-      const currentUser = await this.userRepository.findByUserId(userId);
+    let balance = null;
 
-      return {
-        duplicate: true,
-        transaction: creationResult.transaction,
-        balance: currentUser ? currentUser.balance : user.balance
-      };
+    if (!creationResult.duplicate) {
+      try {
+        const balanceAfter = await this.userRepository.incrementBalance(
+          userId,
+          type === "income" ? amount : -amount
+        );
+        balance = balanceAfter.balance;
+      } catch (error) {
+        this.logger.error("user_balance_cache_update_failed", {
+          userId,
+          transactionId: creationResult.transaction?._id || null,
+          correlationId: input.correlationId || null,
+          error: error.message,
+          stack: error.stack
+        });
+      }
     }
 
-    const balanceAfter = await this.userRepository.incrementBalance(
-      userId,
-      type === "income" ? amount : -amount
-    );
-
     return {
-      duplicate: false,
+      duplicate: creationResult.duplicate,
       transaction: creationResult.transaction,
-      balance: balanceAfter.balance
+      balance: balance ?? await this.getCurrentBalance(userId)
     };
   }
 
   async getTransactions(filter) {
     const userId = this.normalizeUserId(filter.userId);
 
-    await this.ensureUserContext({
+    await this.getUserContext({
       userId,
-      chatId: filter.chatId || null
+      chatId: filter.chatId || null,
+      touchIfExists: true
     });
 
     const normalizedFilter = this.buildTransactionFilter({
@@ -106,18 +114,179 @@ class CoreFinanceService {
     };
   }
 
+  async getTransactionDetail({ userId, transactionId, chatId = null }) {
+    const normalizedUserId = this.normalizeUserId(userId);
+    const normalizedTransactionId = this.normalizeTransactionId(transactionId);
+
+    await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
+
+    const transaction = await this.transactionRepository.findByIdForUser(
+      normalizedTransactionId,
+      normalizedUserId
+    );
+
+    if (!transaction) {
+      throw new AppError("Transaksinya tidak ketemu untuk user ini.", 404, "TRANSACTION_NOT_FOUND");
+    }
+
+    return {
+      transaction,
+      balance: await this.getCurrentBalance(normalizedUserId)
+    };
+  }
+
+  async requestTransactionDeletion({ userId, transactionId, chatId = null }) {
+    const normalizedUserId = this.normalizeUserId(userId);
+    const normalizedTransactionId = this.normalizeTransactionId(transactionId);
+
+    await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
+
+    const transaction = await this.transactionRepository.findByIdForUser(
+      normalizedTransactionId,
+      normalizedUserId
+    );
+
+    if (!transaction) {
+      throw new AppError("Transaksinya tidak ketemu untuk user ini.", 404, "TRANSACTION_NOT_FOUND");
+    }
+
+    if (typeof this.userRepository.setPendingDeleteTransactionId === "function") {
+      await this.userRepository.setPendingDeleteTransactionId(normalizedUserId, normalizedTransactionId);
+    }
+
+    return {
+      status: "pending_confirmation",
+      transaction
+    };
+  }
+
+  async confirmTransactionDeletion({ userId, transactionId, chatId = null }) {
+    const normalizedUserId = this.normalizeUserId(userId);
+    const normalizedTransactionId = this.normalizeTransactionId(transactionId);
+    const user = await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
+
+    if (user.pendingDeleteTransactionId !== normalizedTransactionId) {
+      return {
+        status: "noop",
+        message: `Belum ada permintaan hapus untuk transaksi ${normalizedTransactionId}. Kirim \`hapus ${normalizedTransactionId}\` dulu ya.`
+      };
+    }
+
+    const transaction = await this.transactionRepository.deleteTransaction(normalizedTransactionId, normalizedUserId);
+
+    if (!transaction) {
+      if (typeof this.userRepository.setPendingDeleteTransactionId === "function") {
+        await this.userRepository.setPendingDeleteTransactionId(normalizedUserId, null);
+      }
+
+      return {
+        status: "noop",
+        message: "Transaksinya sudah tidak ada, jadi tidak perlu dihapus lagi."
+      };
+    }
+
+    if (typeof this.userRepository.setPendingDeleteTransactionId === "function") {
+      await this.userRepository.setPendingDeleteTransactionId(normalizedUserId, null);
+    }
+
+    const balance = await this.syncUserBalance(normalizedUserId);
+
+    return {
+      status: "completed",
+      transaction,
+      balance
+    };
+  }
+
+  async updateTransaction(input) {
+    const userId = this.normalizeUserId(input.userId);
+    const transactionId = this.normalizeTransactionId(input.transactionId);
+
+    await this.getUserContext({
+      userId,
+      chatId: input.chatId || null,
+      touchIfExists: true
+    });
+
+    const existingTransaction = await this.transactionRepository.findByIdForUser(transactionId, userId);
+
+    if (!existingTransaction) {
+      throw new AppError("Transaksinya tidak ketemu untuk user ini.", 404, "TRANSACTION_NOT_FOUND");
+    }
+
+    const updates = this.buildTransactionUpdates(input, existingTransaction);
+
+    if (!Object.keys(updates).length) {
+      throw new AppError("Minimal ada satu data transaksi yang diubah ya.", 400, "TRANSACTION_UPDATE_REQUIRED");
+    }
+
+    const transaction = await this.transactionRepository.updateTransaction(transactionId, userId, updates);
+    const balance = await this.syncUserBalance(userId);
+
+    return {
+      transaction,
+      balance
+    };
+  }
+
+  async deleteTransaction({ userId, transactionId, chatId = null }) {
+    const normalizedUserId = this.normalizeUserId(userId);
+    const normalizedTransactionId = this.normalizeTransactionId(transactionId);
+
+    await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
+
+    const transaction = await this.transactionRepository.deleteTransaction(normalizedTransactionId, normalizedUserId);
+
+    if (!transaction) {
+      throw new AppError("Transaksinya tidak ketemu untuk user ini.", 404, "TRANSACTION_NOT_FOUND");
+    }
+
+    const balance = await this.syncUserBalance(normalizedUserId);
+
+    return {
+      transaction,
+      balance
+    };
+  }
+
   async getSummary({ userId, chatId = null }) {
     const normalizedUserId = this.normalizeUserId(userId);
-    const user = await this.ensureUserContext({ userId: normalizedUserId, chatId });
-    const currentMonthTransactions = await this.transactionRepository.listTransactions({
+    const user = await this.getUserContext({
       userId: normalizedUserId,
-      monthKey: getCurrentMonthKey(),
-      disablePagination: true
+      chatId,
+      touchIfExists: true
     });
+    const [allTransactions, currentMonthTransactions] = await Promise.all([
+      this.transactionRepository.listTransactions({
+        userId: normalizedUserId,
+        disablePagination: true
+      }),
+      this.transactionRepository.listTransactions({
+        userId: normalizedUserId,
+        monthKey: getCurrentMonthKey(),
+        disablePagination: true
+      })
+    ]);
 
     return {
       userId: normalizedUserId,
-      balance: user.balance,
+      balance: this.calculateBalanceFromTransactions(allTransactions),
       role: user.role,
       stats: {
         totalTransactions: currentMonthTransactions.length,
@@ -135,7 +304,11 @@ class CoreFinanceService {
       throw new AppError("Format bulannya belum pas. Pakai YYYY-MM, misalnya 2026-04.", 400, "INVALID_MONTH");
     }
 
-    await this.ensureUserContext({ userId: normalizedUserId, chatId });
+    await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
 
     const transactions = await this.transactionRepository.listTransactions({
       userId: normalizedUserId,
@@ -169,7 +342,11 @@ class CoreFinanceService {
   async getChartData({ userId, monthKey, chatId = null }) {
     const normalizedUserId = this.normalizeUserId(userId);
     const normalizedMonthKey = monthKey || getCurrentMonthKey();
-    await this.ensureUserContext({ userId: normalizedUserId, chatId });
+    await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
 
     const transactions = await this.transactionRepository.listTransactions({
       userId: normalizedUserId,
@@ -204,7 +381,11 @@ class CoreFinanceService {
   async getCategoryBreakdown({ userId, monthKey, type, chatId = null }) {
     const normalizedUserId = this.normalizeUserId(userId);
     const normalizedMonthKey = monthKey || getCurrentMonthKey();
-    await this.ensureUserContext({ userId: normalizedUserId, chatId });
+    await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
 
     const transactions = await this.transactionRepository.listTransactions({
       userId: normalizedUserId,
@@ -234,7 +415,11 @@ class CoreFinanceService {
 
   async confirmReset({ userId, chatId = null }) {
     const normalizedUserId = this.normalizeUserId(userId);
-    const user = await this.ensureUserContext({ userId: normalizedUserId, chatId });
+    const user = await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
 
     if (!user.pendingReset) {
       return {
@@ -244,7 +429,16 @@ class CoreFinanceService {
     }
 
     await this.transactionRepository.deleteByUserId(normalizedUserId);
-    await this.userRepository.resetUserState(normalizedUserId);
+
+    try {
+      await this.userRepository.resetUserState(normalizedUserId);
+    } catch (error) {
+      this.logger.error("user_reset_cache_update_failed", {
+        userId: normalizedUserId,
+        error: error.message,
+        stack: error.stack
+      });
+    }
 
     return {
       status: "completed",
@@ -254,7 +448,11 @@ class CoreFinanceService {
 
   async cancelReset({ userId, chatId = null }) {
     const normalizedUserId = this.normalizeUserId(userId);
-    const user = await this.ensureUserContext({ userId: normalizedUserId, chatId });
+    const user = await this.getUserContext({
+      userId: normalizedUserId,
+      chatId,
+      touchIfExists: true
+    });
 
     if (!user.pendingReset) {
       return {
@@ -327,19 +525,24 @@ class CoreFinanceService {
       return accumulator;
     }, {});
 
+    const topUsers = Object.values(perUser)
+      .sort((a, b) => b.transactionCount - a.transactionCount)
+      .slice(0, Number(limit));
+    const balanceByUserId = await this.transactionRepository.getBalancesByUserIds(
+      topUsers.map((item) => item.userId)
+    );
+
     return {
       month: normalizedMonthKey,
-      items: Object.values(perUser)
-        .map((item) => {
-          const user = users.find((entry) => entry.userId === item.userId);
-          return {
-            ...item,
-            balance: user ? user.balance : 0,
-            role: user ? user.role : "user"
-          };
-        })
-        .sort((a, b) => b.transactionCount - a.transactionCount)
-        .slice(0, Number(limit))
+      items: topUsers.map((item) => {
+        const user = users.find((entry) => entry.userId === item.userId);
+
+        return {
+          ...item,
+          balance: balanceByUserId[item.userId] ?? user?.balance ?? 0,
+          role: user ? user.role : this.getUserRole(item.userId)
+        };
+      })
     };
   }
 
@@ -368,9 +571,10 @@ class CoreFinanceService {
   async getExportTransactions(filter) {
     const userId = this.normalizeUserId(filter.userId);
 
-    await this.ensureUserContext({
+    await this.getUserContext({
       userId,
-      chatId: filter.chatId || null
+      chatId: filter.chatId || null,
+      touchIfExists: false
     });
 
     const normalizedFilter = {
@@ -385,7 +589,7 @@ class CoreFinanceService {
   }
 
   async ensureAdminAccess(userId) {
-    const user = await this.ensureUserContext({
+    const user = await this.getUserContext({
       userId: this.normalizeUserId(userId)
     });
 
@@ -424,14 +628,89 @@ class CoreFinanceService {
     }
 
     if (filter.fromDateKey) {
+      if (!isValidDayKey(filter.fromDateKey)) {
+        throw new AppError("Format tanggal awal harus YYYY-MM-DD ya.", 400, "INVALID_DATE_RANGE");
+      }
+
       normalized.fromDateKey = filter.fromDateKey;
     }
 
     if (filter.toDateKey) {
+      if (!isValidDayKey(filter.toDateKey)) {
+        throw new AppError("Format tanggal akhir harus YYYY-MM-DD ya.", 400, "INVALID_DATE_RANGE");
+      }
+
       normalized.toDateKey = filter.toDateKey;
     }
 
+    if (
+      normalized.fromDateKey &&
+      normalized.toDateKey &&
+      normalized.fromDateKey > normalized.toDateKey
+    ) {
+      throw new AppError("Tanggal awal tidak boleh lebih besar dari tanggal akhir.", 400, "INVALID_DATE_RANGE");
+    }
+
     return normalized;
+  }
+
+  buildTransactionUpdates(input, existingTransaction) {
+    const updates = {};
+
+    if (input.type !== undefined) {
+      if (!["income", "expense"].includes(input.type)) {
+        throw new AppError("Jenis transaksinya belum pas. Pakai masuk atau keluar ya.", 400, "INVALID_TRANSACTION_TYPE");
+      }
+
+      updates.type = input.type;
+    }
+
+    if (input.amount !== undefined) {
+      const amount = this.normalizeAmount(input.amount);
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new AppError("Nominalnya belum valid. Masukkan angka lebih dari 0 ya.", 400, "INVALID_AMOUNT");
+      }
+
+      updates.amount = amount;
+    }
+
+    if (input.category !== undefined) {
+      const category = this.normalizeCategory(input.category);
+
+      if (!category) {
+        throw new AppError("Kategorinya jangan kosong ya.", 400, "CATEGORY_REQUIRED");
+      }
+
+      updates.category = category;
+    }
+
+    if (input.transactionDate !== undefined) {
+      const transactionAt = this.resolveTransactionAt(input.transactionDate);
+      const { dateKey, monthKey } = getLocalDateParts(transactionAt);
+
+      updates.transactionAt = transactionAt;
+      updates.dateKey = dateKey;
+      updates.monthKey = monthKey;
+    }
+
+    if (
+      updates.type === undefined &&
+      updates.amount === undefined &&
+      updates.category === undefined &&
+      updates.transactionAt === undefined
+    ) {
+      return {};
+    }
+
+    return {
+      type: updates.type ?? existingTransaction.type,
+      amount: updates.amount ?? existingTransaction.amount,
+      category: updates.category ?? existingTransaction.category,
+      transactionAt: updates.transactionAt ?? existingTransaction.transactionAt,
+      dateKey: updates.dateKey ?? existingTransaction.dateKey,
+      monthKey: updates.monthKey ?? existingTransaction.monthKey
+    };
   }
 
   buildBreakdown(transactions) {
@@ -457,6 +736,41 @@ class CoreFinanceService {
       .reduce((sum, item) => sum + item.amount, 0);
   }
 
+  calculateBalanceFromTransactions(transactions) {
+    return transactions.reduce((sum, item) => (
+      sum + (item.type === "income" ? item.amount : -item.amount)
+    ), 0);
+  }
+
+  async getCurrentBalance(userId) {
+    return this.transactionRepository.getBalanceForUser(userId);
+  }
+
+  async getUserContext({ userId, chatId = null, touchIfExists = false }) {
+    const normalizedUserId = this.normalizeUserId(userId);
+
+    if (!normalizedUserId) {
+      throw new AppError("User belum dikenali. Coba kirim pesan lagi ya.", 400, "USER_ID_REQUIRED");
+    }
+
+    const existingUser = await this.userRepository.findByUserId(normalizedUserId);
+
+    if (!existingUser) {
+      return this.buildDefaultUserContext(normalizedUserId);
+    }
+
+    if (!touchIfExists || typeof this.userRepository.touchContext !== "function") {
+      return existingUser;
+    }
+
+    const touchedUser = await this.userRepository.touchContext({
+      userId: normalizedUserId,
+      chatId
+    });
+
+    return touchedUser || existingUser;
+  }
+
   async ensureUserContext({ userId, chatId = null }) {
     const normalizedUserId = this.normalizeUserId(userId);
 
@@ -464,10 +778,44 @@ class CoreFinanceService {
       throw new AppError("User belum dikenali. Coba kirim pesan lagi ya.", 400, "USER_ID_REQUIRED");
     }
 
+    const existingUser = await this.userRepository.findByUserId(normalizedUserId);
+
+    if (existingUser) {
+      if (typeof this.userRepository.touchContext !== "function") {
+        return existingUser;
+      }
+
+      const touchedUser = await this.userRepository.touchContext({
+        userId: normalizedUserId,
+        chatId
+      });
+
+      return touchedUser || existingUser;
+    }
+
     return this.userRepository.upsertContext({
       userId: normalizedUserId,
       chatId
     });
+  }
+
+  buildDefaultUserContext(userId) {
+    return {
+      userId,
+      role: this.getUserRole(userId),
+      balance: 0,
+      pendingReset: false,
+      pendingDeleteTransactionId: null,
+      timezone: env.timezone,
+      preferredChannel: "whatsapp",
+      lastKnownChatId: null,
+      lastInteractionAt: null,
+      isActive: false
+    };
+  }
+
+  getUserRole(userId) {
+    return this.adminUserIds.has(userId) ? "admin" : "user";
   }
 
   normalizeUserId(userId) {
@@ -480,6 +828,50 @@ class CoreFinanceService {
 
   normalizeAmount(amount) {
     return parseAmount(amount);
+  }
+
+  normalizeTransactionId(transactionId) {
+    const normalizedTransactionId = String(transactionId || "").trim();
+
+    if (!normalizedTransactionId) {
+      throw new AppError("ID transaksi wajib diisi ya.", 400, "TRANSACTION_ID_REQUIRED");
+    }
+
+    return normalizedTransactionId;
+  }
+
+  async syncUserBalance(userId) {
+    const balance = await this.getCurrentBalance(userId);
+
+    try {
+      if (typeof this.userRepository.setBalance === "function") {
+        await this.userRepository.setBalance(userId, balance);
+      }
+    } catch (error) {
+      this.logger.error("user_balance_cache_sync_failed", {
+        userId,
+        error: error.message,
+        stack: error.stack
+      });
+    }
+
+    return balance;
+  }
+
+  resolveTransactionAt(transactionDate) {
+    if (!transactionDate) {
+      return new Date().toISOString();
+    }
+
+    if (!isValidDayKey(transactionDate)) {
+      throw new AppError("Format tanggal transaksi harus YYYY-MM-DD ya.", 400, "INVALID_TRANSACTION_DATE");
+    }
+
+    if (transactionDate > getCurrentDayKey()) {
+      throw new AppError("Tanggal transaksi tidak boleh lebih dari hari ini.", 400, "INVALID_TRANSACTION_DATE");
+    }
+
+    return `${transactionDate}T05:00:00.000Z`;
   }
 }
 

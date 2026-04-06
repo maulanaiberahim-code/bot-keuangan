@@ -1,6 +1,6 @@
 const { formatCurrency, formatDate } = require("./formatter");
 
-function buildHelpMessage() {
+function buildLegacyHelpMessage() {
   return [
     "Hai, aku CatatDuit 👋",
     "Coba kirim salah satu format ini ya:",
@@ -33,7 +33,7 @@ function buildHelpMessage() {
   ].join("\n");
 }
 
-function formatTransactionCreated(result) {
+function formatLegacyTransactionCreated(result) {
   const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
   const intro = result.transaction.type === "income"
     ? "Sip, pemasukan kamu sudah kecatat ✅"
@@ -63,7 +63,7 @@ function formatSummary(summary) {
   ].join("\n");
 }
 
-function formatTransactionHistory(items, meta, filterDescription = "Riwayat transaksi") {
+function formatLegacyTransactionHistory(items, meta, filterDescription = "Riwayat transaksi") {
   if (!items.length) {
     return [
       "Belum ada catatan yang cocok.",
@@ -180,8 +180,174 @@ function formatInsight(item) {
   return `${item.category} (${formatCurrency(item.amount)})`;
 }
 
+function buildHelpMessage({ isAdmin = false } = {}) {
+  const lines = [
+    "Hai, aku CatatDuit.",
+    "Coba kirim salah satu format ini ya:",
+    "",
+    "Catat transaksi",
+    "- masuk 50000 gaji",
+    "- keluar 20000 makan",
+    "- masuk 50000 gaji tanggal 2026-04-05",
+    "- keluar 20000 makan tanggal 2026-04-05",
+    "- ubah <id> keluar 25000 makan tanggal 2026-04-05",
+    "- hapus <id>",
+    "- konfirmasi hapus <id>",
+    "",
+    "Cek catatan",
+    "- saldo",
+    "- riwayat",
+    "- riwayat hari ini",
+    "- riwayat bulan ini",
+    "- riwayat detail <id>",
+    "- riwayat 2026-04-01 sampai 2026-04-05",
+    "- riwayat kategori makan",
+    "- laporan bulan ini",
+    "- laporan 2026-04",
+    "",
+    "Reset data",
+    "- reset",
+    "- ya reset",
+    "- batal reset"
+  ];
+
+  if (isAdmin) {
+    lines.push(
+      "",
+      "Menu admin",
+      "- admin stats",
+      "- admin stats 2026-04",
+      "- admin kategori",
+      "- admin kategori 2026-04",
+      "- admin user aktif",
+      "- admin user aktif 2026-04"
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function buildUserHelpMessage() {
+  return buildHelpMessage({ isAdmin: false });
+}
+
+function buildAdminHelpMessage() {
+  return buildHelpMessage({ isAdmin: true });
+}
+
+function formatTransactionCreated(result) {
+  const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
+  const intro = result.transaction.type === "income"
+    ? "Sip, pemasukan kamu sudah kecatat."
+    : "Sip, pengeluaran kamu sudah kecatat.";
+
+  return [
+    intro,
+    `- ${action}: ${formatCurrency(result.transaction.amount)}`,
+    `- Kategori: ${result.transaction.category}`,
+    result.transaction.transactionAt
+      ? `- Tanggal transaksi: ${formatDate(result.transaction.transactionAt)}`
+      : null,
+    `- Saldo sekarang: ${formatCurrency(result.balance)}`,
+    result.duplicate
+      ? "Catatan yang sama sudah pernah masuk, jadi saldo tidak berubah."
+      : "Kalau mau, lanjut cek `saldo` atau `riwayat`."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatTransactionUpdated(result) {
+  const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
+
+  return [
+    "Siap, transaksinya sudah diperbarui.",
+    `- ID: ${result.transaction._id}`,
+    `- ${action}: ${formatCurrency(result.transaction.amount)}`,
+    `- Kategori: ${result.transaction.category}`,
+    result.transaction.transactionAt
+      ? `- Tanggal transaksi: ${formatDate(result.transaction.transactionAt)}`
+      : null,
+    `- Saldo sekarang: ${formatCurrency(result.balance)}`
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatTransactionDeleted(result) {
+  const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
+
+  return [
+    "Siap, transaksinya sudah dihapus.",
+    `- ID: ${result.transaction._id}`,
+    `- ${action}: ${formatCurrency(result.transaction.amount)}`,
+    `- Kategori: ${result.transaction.category}`,
+    `- Saldo sekarang: ${formatCurrency(result.balance)}`
+  ].join("\n");
+}
+
+function formatTransactionDeleteRequested(result) {
+  const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
+
+  return [
+    "Penghapusan belum dijalankan.",
+    `- ID: ${result.transaction._id}`,
+    `- ${action}: ${formatCurrency(result.transaction.amount)}`,
+    `- Kategori: ${result.transaction.category}`,
+    "Kalau memang yakin, kirim:",
+    `konfirmasi hapus ${result.transaction._id}`
+  ].join("\n");
+}
+
+function formatTransactionDetail(result) {
+  const action = result.transaction.type === "income" ? "Pemasukan" : "Pengeluaran";
+
+  return [
+    "Detail transaksi:",
+    `- ID: ${result.transaction._id}`,
+    `- Jenis: ${action}`,
+    `- Nominal: ${formatCurrency(result.transaction.amount)}`,
+    `- Kategori: ${result.transaction.category}`,
+    result.transaction.transactionAt
+      ? `- Tanggal transaksi: ${formatDate(result.transaction.transactionAt)}`
+      : null,
+    result.transaction.createdAt
+      ? `- Dicatat pada: ${formatDate(result.transaction.createdAt)}`
+      : null,
+    `- Saldo saat ini: ${formatCurrency(result.balance)}`,
+    "",
+    `Kalau mau ubah, kirim \`ubah ${result.transaction._id} ${result.transaction.type === "income" ? "masuk" : "keluar"} ${result.transaction.amount} ${result.transaction.category}\`.`,
+    `Kalau mau hapus, kirim \`hapus ${result.transaction._id}\`, lalu lanjutkan dengan \`konfirmasi hapus ${result.transaction._id}\`.`
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatTransactionHistory(items, meta, filterDescription = "Riwayat transaksi") {
+  if (!items.length) {
+    return [
+      "Belum ada catatan yang cocok.",
+      "Coba cek `riwayat` atau ganti filter ya."
+    ].join("\n");
+  }
+
+  return [
+    `${filterDescription}:`,
+    ...items.map((transaction) => [
+      `- ID ${transaction._id}`,
+      `- ${transaction.type === "income" ? "Masuk" : "Keluar"} ${formatCurrency(transaction.amount)}`,
+      `${transaction.category}`,
+      `(${formatDate(transaction.transactionAt || transaction.createdAt)})`
+    ].join(" | ")),
+    "",
+    `Ketemu ${items.length} dari total ${meta.totalItems} transaksi.`
+  ].join("\n");
+}
+
 module.exports = {
+  buildAdminHelpMessage,
   buildHelpMessage,
+  buildUserHelpMessage,
   formatAdminStats,
   formatDailySummary,
   formatMonthlyReport,
@@ -190,5 +356,10 @@ module.exports = {
   formatSummary,
   formatTopCategories,
   formatTransactionCreated,
+  formatTransactionDeleteRequested,
+  formatTransactionDetail,
+  formatTransactionDeleted,
   formatTransactionHistory
+  ,
+  formatTransactionUpdated
 };

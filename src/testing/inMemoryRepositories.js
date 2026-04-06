@@ -10,6 +10,7 @@ class InMemoryUserRepository {
       role: this.adminUserIds.has(userId) ? "admin" : "user",
       balance: 0,
       pendingReset: false,
+      pendingDeleteTransactionId: null,
       timezone,
       preferredChannel: "whatsapp",
       lastKnownChatId: null,
@@ -38,6 +39,27 @@ class InMemoryUserRepository {
     return this.users.get(userId) || null;
   }
 
+  async touchContext({ userId, chatId = null, timezone = "Asia/Jakarta" }) {
+    const user = await this.findByUserId(userId);
+
+    if (!user) {
+      return null;
+    }
+
+    const next = {
+      ...user,
+      timezone,
+      preferredChannel: "whatsapp",
+      isActive: true,
+      lastInteractionAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...(chatId ? { lastKnownChatId: chatId } : {})
+    };
+
+    this.users.set(userId, next);
+    return next;
+  }
+
   async incrementBalance(userId, delta) {
     const user = await this.findByUserId(userId);
     const next = { ...user, balance: user.balance + delta, updatedAt: new Date().toISOString() };
@@ -52,14 +74,29 @@ class InMemoryUserRepository {
     return next;
   }
 
+  async setPendingDeleteTransactionId(userId, transactionId) {
+    const user = await this.findByUserId(userId);
+    const next = { ...user, pendingDeleteTransactionId: transactionId, updatedAt: new Date().toISOString() };
+    this.users.set(userId, next);
+    return next;
+  }
+
   async resetUserState(userId) {
     const user = await this.findByUserId(userId);
     const next = {
       ...user,
       balance: 0,
       pendingReset: false,
+      pendingDeleteTransactionId: null,
       updatedAt: new Date().toISOString()
     };
+    this.users.set(userId, next);
+    return next;
+  }
+
+  async setBalance(userId, balance) {
+    const user = await this.findByUserId(userId);
+    const next = { ...user, balance, updatedAt: new Date().toISOString() };
     this.users.set(userId, next);
     return next;
   }
@@ -124,14 +161,35 @@ class InMemoryTransactionRepository {
   }
 
   async createTransaction(transaction) {
+    const createdAt = new Date().toISOString();
     const created = {
       ...transaction,
       _id: String(this.transactions.length + 1),
-      createdAt: transaction.createdAt || new Date().toISOString(),
-      updatedAt: transaction.createdAt || new Date().toISOString()
+      transactionAt: transaction.transactionAt || createdAt,
+      createdAt,
+      updatedAt: createdAt
     };
     this.transactions.push(created);
     return created;
+  }
+
+  async getBalanceForUser(userId) {
+    const balances = await this.getBalancesByUserIds([userId]);
+    return balances[userId] || 0;
+  }
+
+  async getBalancesByUserIds(userIds = []) {
+    const normalizedUserIds = [...new Set(userIds.filter(Boolean))];
+
+    return this.transactions.reduce((result, transaction) => {
+      if (!normalizedUserIds.includes(transaction.userId)) {
+        return result;
+      }
+
+      const delta = transaction.type === "income" ? transaction.amount : -transaction.amount;
+      result[transaction.userId] = (result[transaction.userId] || 0) + delta;
+      return result;
+    }, {});
   }
 
   async listTransactions(filter = {}) {
@@ -165,7 +223,15 @@ class InMemoryTransactionRepository {
       items = items.filter((item) => item.dateKey <= filter.toDateKey);
     }
 
-    items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    items.sort((a, b) => {
+      const transactionAtDelta = new Date(b.transactionAt || b.createdAt) - new Date(a.transactionAt || a.createdAt);
+
+      if (transactionAtDelta !== 0) {
+        return transactionAtDelta;
+      }
+
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
 
     if (filter.disablePagination === true) {
       return items;
@@ -180,6 +246,38 @@ class InMemoryTransactionRepository {
   async countTransactions(filter = {}) {
     const items = await this.listTransactions({ ...filter, disablePagination: true });
     return items.length;
+  }
+
+  async findByIdForUser(transactionId, userId) {
+    return this.transactions.find((item) => item._id === transactionId && item.userId === userId) || null;
+  }
+
+  async updateTransaction(transactionId, userId, updates) {
+    const index = this.transactions.findIndex((item) => item._id === transactionId && item.userId === userId);
+
+    if (index < 0) {
+      return null;
+    }
+
+    const next = {
+      ...this.transactions[index],
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+
+    this.transactions[index] = next;
+    return next;
+  }
+
+  async deleteTransaction(transactionId, userId) {
+    const index = this.transactions.findIndex((item) => item._id === transactionId && item.userId === userId);
+
+    if (index < 0) {
+      return null;
+    }
+
+    const [deleted] = this.transactions.splice(index, 1);
+    return deleted;
   }
 
   async deleteByUserId(userId) {
@@ -219,12 +317,29 @@ class InMemoryDeliveryJobRepository {
 
   async findDueJobs(limit = 20) {
     return this.jobs
-      .filter((job) => new Date(job.nextRetryAt) <= new Date() && job.status !== "completed")
+      .filter((job) => (
+        job.status === "pending" &&
+        new Date(job.nextRetryAt) <= new Date() &&
+        Number(job.attempts || 0) < Number(job.maxAttempts || 0)
+      ))
       .slice(0, limit);
   }
 
   async markProcessing(id) {
     const job = this.jobs.find((item) => item._id === id);
+
+    if (!job) {
+      return null;
+    }
+
+    if (
+      job.status !== "pending" ||
+      new Date(job.nextRetryAt) > new Date() ||
+      Number(job.attempts || 0) >= Number(job.maxAttempts || 0)
+    ) {
+      return null;
+    }
+
     job.status = "processing";
     return job;
   }

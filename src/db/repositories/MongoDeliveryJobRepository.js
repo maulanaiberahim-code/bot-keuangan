@@ -31,8 +31,13 @@ class MongoDeliveryJobRepository {
   }
 
   async markProcessing(id) {
-    return DeliveryJobModel.findByIdAndUpdate(
-      id,
+    return DeliveryJobModel.findOneAndUpdate(
+      {
+        _id: id,
+        status: "pending",
+        nextRetryAt: { $lte: new Date() },
+        $expr: { $lt: ["$attempts", "$maxAttempts"] }
+      },
       { $set: { status: "processing" } },
       { new: true, lean: true }
     );

@@ -37,6 +37,21 @@ function getCurrentMonthKey() {
   return getLocalDateParts().monthKey;
 }
 
+function isValidDayKey(dayKey) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    return false;
+  }
+
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
 function isValidMonthKey(monthKey) {
   if (!/^\d{4}-\d{2}$/.test(monthKey)) {
     return false;
@@ -51,6 +66,7 @@ module.exports = {
   getCurrentDayKey,
   getCurrentMonthKey,
   getLocalDateParts,
+  isValidDayKey,
   isValidMonthKey,
   matchesDay,
   matchesMonth

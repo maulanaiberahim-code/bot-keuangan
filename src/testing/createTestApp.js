@@ -10,8 +10,9 @@ const DEFAULT_TEST_API_KEY = "local-api-key";
 
 function createTestApp(options = {}) {
   const logger = createNoopLogger();
+  const adminUserIds = options.adminUserIds || [];
   const userRepository = options.userRepository || new InMemoryUserRepository({
-    adminUserIds: options.adminUserIds || []
+    adminUserIds
   });
   const transactionRepository = options.transactionRepository || new InMemoryTransactionRepository();
   const deliveryJobRepository = options.deliveryJobRepository || new InMemoryDeliveryJobRepository();
@@ -19,6 +20,7 @@ function createTestApp(options = {}) {
   const context = createAppContext({
     logger,
     serviceName: "test",
+    adminUserIds,
     userRepository,
     transactionRepository,
     deliveryJobRepository

@@ -2,8 +2,12 @@ const UserModel = require("../models/UserModel");
 const env = require("../../config/env");
 
 class MongoUserRepository {
+  constructor(options = {}) {
+    this.adminUserIds = new Set(options.adminUserIds || env.adminUserIds);
+  }
+
   async upsertContext({ userId, chatId = null, timezone = env.timezone }) {
-    const role = env.adminUserIds.includes(userId) ? "admin" : "user";
+    const role = this.adminUserIds.has(userId) ? "admin" : "user";
 
     return UserModel.findOneAndUpdate(
       { userId },
@@ -18,7 +22,8 @@ class MongoUserRepository {
         },
         $setOnInsert: {
           balance: 0,
-          pendingReset: false
+          pendingReset: false,
+          pendingDeleteTransactionId: null
         }
       },
       {
@@ -31,6 +36,25 @@ class MongoUserRepository {
 
   async findByUserId(userId) {
     return UserModel.findOne({ userId }).lean();
+  }
+
+  async touchContext({ userId, chatId = null, timezone = env.timezone }) {
+    return UserModel.findOneAndUpdate(
+      { userId },
+      {
+        $set: {
+          timezone,
+          preferredChannel: "whatsapp",
+          isActive: true,
+          lastInteractionAt: new Date(),
+          ...(chatId ? { lastKnownChatId: chatId } : {})
+        }
+      },
+      {
+        new: true,
+        lean: true
+      }
+    );
   }
 
   async incrementBalance(userId, delta) {
@@ -62,6 +86,22 @@ class MongoUserRepository {
     );
   }
 
+  async setPendingDeleteTransactionId(userId, transactionId) {
+    return UserModel.findOneAndUpdate(
+      { userId },
+      {
+        $set: {
+          pendingDeleteTransactionId: transactionId,
+          lastInteractionAt: new Date()
+        }
+      },
+      {
+        new: true,
+        lean: true
+      }
+    );
+  }
+
   async resetUserState(userId) {
     return UserModel.findOneAndUpdate(
       { userId },
@@ -69,6 +109,23 @@ class MongoUserRepository {
         $set: {
           balance: 0,
           pendingReset: false,
+          pendingDeleteTransactionId: null,
+          lastInteractionAt: new Date()
+        }
+      },
+      {
+        new: true,
+        lean: true
+      }
+    );
+  }
+
+  async setBalance(userId, balance) {
+    return UserModel.findOneAndUpdate(
+      { userId },
+      {
+        $set: {
+          balance,
           lastInteractionAt: new Date()
         }
       },

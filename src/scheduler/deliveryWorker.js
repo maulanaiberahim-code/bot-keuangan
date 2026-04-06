@@ -20,26 +20,30 @@ class DeliveryWorker {
       const correlationId = generateCorrelationId();
 
       try {
-        await this.deliveryJobRepository.markProcessing(job._id);
+        const claimedJob = await this.deliveryJobRepository.markProcessing(job._id);
 
-        const text = this.formatJob(job);
+        if (!claimedJob) {
+          continue;
+        }
+
+        const text = this.formatJob(claimedJob);
         await this.deliveryGateway.sendText({
-          chatId: job.chatId,
+          chatId: claimedJob.chatId,
           text,
           correlationId
         });
 
-        await this.deliveryJobRepository.markCompleted(job._id);
+        await this.deliveryJobRepository.markCompleted(claimedJob._id);
         this.metrics.schedulerJobsTotal.inc({
-          report_type: job.reportType,
+          report_type: claimedJob.reportType,
           status: "completed"
         });
 
         this.logger.info("delivery_job_completed", {
           correlationId,
-          jobId: job._id,
-          reportType: job.reportType,
-          userId: job.userId
+          jobId: claimedJob._id,
+          reportType: claimedJob.reportType,
+          userId: claimedJob.userId
         });
       } catch (error) {
         const attempts = Number(job.attempts || 0) + 1;

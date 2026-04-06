@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const ExcelJS = require("exceljs");
+const AppError = require("../errors/AppError");
 const { EXPORT_DIR } = require("../config/paths");
 
 class ExportService {
@@ -11,7 +12,7 @@ class ExportService {
   async buildCsvExport(transactions, fileName) {
     this.ensureExportDir();
 
-    const headers = ["createdAt", "userId", "type", "amount", "category", "source", "chatId"];
+    const headers = ["transactionAt", "createdAt", "userId", "type", "amount", "category", "source", "chatId"];
     const lines = [
       headers.join(","),
       ...transactions.map((transaction) => headers
@@ -19,7 +20,7 @@ class ExportService {
         .join(","))
     ];
 
-    const filePath = path.join(EXPORT_DIR, fileName);
+    const filePath = this.resolveExportPath(fileName);
     fs.writeFileSync(filePath, `${lines.join("\n")}\n`, "utf8");
 
     return {
@@ -37,6 +38,7 @@ class ExportService {
     const sheet = workbook.addWorksheet("Transactions");
 
     sheet.columns = [
+      { header: "Tanggal Transaksi", key: "transactionAt", width: 24 },
       { header: "Tanggal", key: "createdAt", width: 24 },
       { header: "User ID", key: "userId", width: 18 },
       { header: "Tipe", key: "type", width: 12 },
@@ -55,6 +57,7 @@ class ExportService {
 
     transactions.forEach((transaction) => {
       sheet.addRow({
+        transactionAt: transaction.transactionAt,
         createdAt: transaction.createdAt,
         userId: transaction.userId,
         type: transaction.type,
@@ -68,7 +71,7 @@ class ExportService {
     sheet.getColumn("amount").numFmt = "#,##0";
     sheet.views = [{ state: "frozen", ySplit: 1 }];
 
-    const filePath = path.join(EXPORT_DIR, fileName);
+    const filePath = this.resolveExportPath(fileName);
     await workbook.xlsx.writeFile(filePath);
     const stats = fs.statSync(filePath);
 
@@ -84,6 +87,17 @@ class ExportService {
     if (!fs.existsSync(EXPORT_DIR)) {
       fs.mkdirSync(EXPORT_DIR, { recursive: true });
     }
+  }
+
+  resolveExportPath(fileName) {
+    const exportRoot = path.resolve(EXPORT_DIR);
+    const filePath = path.resolve(exportRoot, fileName);
+
+    if (filePath !== exportRoot && !filePath.startsWith(`${exportRoot}${path.sep}`)) {
+      throw new AppError("Nama file export tidak valid.", 400, "INVALID_EXPORT_FILENAME");
+    }
+
+    return filePath;
   }
 
   escapeCsvValue(value) {

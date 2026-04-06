@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const TransactionModel = require("../models/TransactionModel");
 
 class MongoTransactionRepository {
@@ -34,6 +35,88 @@ class MongoTransactionRepository {
     return created.toObject();
   }
 
+  async findByIdForUser(transactionId, userId) {
+    if (!mongoose.isValidObjectId(transactionId)) {
+      return null;
+    }
+
+    return TransactionModel.findOne({
+      _id: transactionId,
+      userId
+    }).lean();
+  }
+
+  async updateTransaction(transactionId, userId, updates) {
+    if (!mongoose.isValidObjectId(transactionId)) {
+      return null;
+    }
+
+    return TransactionModel.findOneAndUpdate(
+      {
+        _id: transactionId,
+        userId
+      },
+      {
+        $set: updates
+      },
+      {
+        new: true,
+        lean: true
+      }
+    );
+  }
+
+  async deleteTransaction(transactionId, userId) {
+    if (!mongoose.isValidObjectId(transactionId)) {
+      return null;
+    }
+
+    return TransactionModel.findOneAndDelete({
+      _id: transactionId,
+      userId
+    }).lean();
+  }
+
+  async getBalanceForUser(userId) {
+    const balances = await this.getBalancesByUserIds([userId]);
+    return balances[userId] || 0;
+  }
+
+  async getBalancesByUserIds(userIds = []) {
+    const normalizedUserIds = [...new Set(userIds.filter(Boolean))];
+
+    if (!normalizedUserIds.length) {
+      return {};
+    }
+
+    const items = await TransactionModel.aggregate([
+      {
+        $match: {
+          userId: { $in: normalizedUserIds }
+        }
+      },
+      {
+        $group: {
+          _id: "$userId",
+          balance: {
+            $sum: {
+              $cond: [
+                { $eq: ["$type", "income"] },
+                "$amount",
+                { $multiply: ["$amount", -1] }
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    return items.reduce((result, item) => {
+      result[item._id] = item.balance;
+      return result;
+    }, {});
+  }
+
   async listTransactions(filter = {}) {
     const query = {};
 
@@ -67,7 +150,7 @@ class MongoTransactionRepository {
     const page = Number(filter.page || 1);
     const limit = Number(filter.limit || 20);
 
-    const mongoQuery = TransactionModel.find(query).sort({ createdAt: -1 });
+    const mongoQuery = TransactionModel.find(query).sort({ transactionAt: -1, createdAt: -1 });
 
     if (filter.disablePagination !== true) {
       mongoQuery.skip((page - 1) * limit).limit(limit);

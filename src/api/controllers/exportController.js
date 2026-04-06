@@ -1,4 +1,5 @@
 const path = require("path");
+const { normalizeUserId } = require("../../utils/user");
 
 function createExportController(context) {
   const financeService = context.services.coreFinanceService;
@@ -44,8 +45,9 @@ function createExportController(context) {
 }
 
 function buildFileName(prefix, userId, month, extension) {
-  const suffix = month || "all";
-  return `${prefix}-${userId}-${suffix}.${extension}`;
+  const normalizedUserId = normalizeUserId(userId) || "unknown-user";
+  const suffix = /^\d{4}-\d{2}$/.test(String(month || "")) ? month : "all";
+  return `${prefix}-${normalizedUserId}-${suffix}.${extension}`;
 }
 
 module.exports = createExportController;

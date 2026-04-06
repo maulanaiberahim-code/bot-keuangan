@@ -1,4 +1,4 @@
-const { isValidMonthKey } = require("../../utils/dateHelper");
+const { isValidDayKey, isValidMonthKey } = require("../../utils/dateHelper");
 
 function parseCommand(text) {
   const trimmed = String(text || "").trim();
@@ -28,6 +28,25 @@ function parseCommand(text) {
 
   if (lowerText === "riwayat bulan ini") {
     return { name: "history", filter: { period: "month" } };
+  }
+
+  const historyDetailMatch = normalized.match(/^riwayat detail\s+(\S+)$/i);
+  if (historyDetailMatch) {
+    return {
+      name: "transaction_detail",
+      transactionId: historyDetailMatch[1]
+    };
+  }
+
+  const historyRangeMatch = normalized.match(/^riwayat\s+(\d{4}-\d{2}-\d{2})\s+(?:sampai|s\/d)\s+(\d{4}-\d{2}-\d{2})$/i);
+  if (historyRangeMatch && isValidDayKey(historyRangeMatch[1]) && isValidDayKey(historyRangeMatch[2])) {
+    return {
+      name: "history",
+      filter: {
+        fromDateKey: historyRangeMatch[1],
+        toDateKey: historyRangeMatch[2]
+      }
+    };
   }
 
   const historyCategoryMatch = normalized.match(/^riwayat kategori\s+(.+)$/i);
@@ -88,21 +107,51 @@ function parseCommand(text) {
     return { name: "admin_active_users", month: adminActiveUsersMonthMatch[1] };
   }
 
-  const incomeMatch = normalized.match(/^masuk\s+([0-9.,]+)\s+(.+)$/i);
+  const incomeMatch = normalized.match(/^masuk\s+([0-9.,]+)\s+(.+?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
   if (incomeMatch) {
     return {
       name: "income",
       amount: incomeMatch[1],
-      category: incomeMatch[2].trim()
+      category: incomeMatch[2].trim(),
+      transactionDate: incomeMatch[3] || null
     };
   }
 
-  const expenseMatch = normalized.match(/^keluar\s+([0-9.,]+)\s+(.+)$/i);
+  const expenseMatch = normalized.match(/^keluar\s+([0-9.,]+)\s+(.+?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
   if (expenseMatch) {
     return {
       name: "expense",
       amount: expenseMatch[1],
-      category: expenseMatch[2].trim()
+      category: expenseMatch[2].trim(),
+      transactionDate: expenseMatch[3] || null
+    };
+  }
+
+  const updateMatch = normalized.match(/^ubah(?: transaksi)?\s+(\S+)\s+(masuk|keluar)\s+([0-9.,]+)\s+(.+?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  if (updateMatch) {
+    return {
+      name: "update_transaction",
+      transactionId: updateMatch[1],
+      type: updateMatch[2].toLowerCase() === "masuk" ? "income" : "expense",
+      amount: updateMatch[3],
+      category: updateMatch[4].trim(),
+      transactionDate: updateMatch[5] || undefined
+    };
+  }
+
+  const deleteMatch = normalized.match(/^hapus(?: transaksi)?\s+(\S+)$/i);
+  if (deleteMatch) {
+    return {
+      name: "delete_transaction",
+      transactionId: deleteMatch[1]
+    };
+  }
+
+  const confirmDeleteMatch = normalized.match(/^konfirmasi hapus(?: transaksi)?\s+(\S+)$/i);
+  if (confirmDeleteMatch) {
+    return {
+      name: "confirm_delete_transaction",
+      transactionId: confirmDeleteMatch[1]
     };
   }
 

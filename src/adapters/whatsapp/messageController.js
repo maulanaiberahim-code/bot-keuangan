@@ -1,3 +1,4 @@
+const env = require("../../config/env");
 const { getCurrentMonthKey } = require("../../utils/dateHelper");
 const {
   buildHelpMessage,
@@ -8,15 +9,21 @@ const {
   formatSummary,
   formatTopCategories,
   formatTransactionCreated,
+  formatTransactionDeleteRequested,
+  formatTransactionDetail,
+  formatTransactionDeleted,
   formatTransactionHistory
+  ,
+  formatTransactionUpdated
 } = require("../../utils/messagePresenter");
 const { parseCommand } = require("./commandParser");
 const AppError = require("../../errors/AppError");
 
 class WhatsAppMessageController {
-  constructor({ apiClient, logger }) {
+  constructor({ apiClient, logger, adminUserIds = env.adminUserIds }) {
     this.apiClient = apiClient;
     this.logger = logger;
+    this.adminUserIds = new Set(adminUserIds);
   }
 
   async handle(context) {
@@ -67,9 +74,11 @@ class WhatsAppMessageController {
   }
 
   async dispatch(command, context) {
+    const isAdmin = this.isAdminUser(context.userId);
+
     switch (command.name) {
       case "help":
-        return buildHelpMessage();
+        return buildHelpMessage({ isAdmin });
       case "income": {
         const result = await this.apiClient.request({
           method: "POST",
@@ -82,6 +91,7 @@ class WhatsAppMessageController {
             type: "income",
             amount: command.amount,
             category: command.category,
+            transactionDate: command.transactionDate,
             source: "whatsapp",
             idempotencyKey: `${context.chatId}:${context.messageId || context.correlationId}`
           }
@@ -101,12 +111,75 @@ class WhatsAppMessageController {
             type: "expense",
             amount: command.amount,
             category: command.category,
+            transactionDate: command.transactionDate,
             source: "whatsapp",
             idempotencyKey: `${context.chatId}:${context.messageId || context.correlationId}`
           }
         });
 
         return formatTransactionCreated(result);
+      }
+      case "update_transaction": {
+        const result = await this.apiClient.request({
+          method: "PATCH",
+          path: `/transactions/${command.transactionId}`,
+          correlationId: context.correlationId,
+          commandName: command.name,
+          body: {
+            userId: context.userId,
+            chatId: context.chatId,
+            type: command.type,
+            amount: command.amount,
+            category: command.category,
+            transactionDate: command.transactionDate
+          }
+        });
+
+        return formatTransactionUpdated(result);
+      }
+      case "delete_transaction": {
+        const result = await this.apiClient.request({
+          method: "POST",
+          path: `/transactions/${command.transactionId}/delete-request`,
+          correlationId: context.correlationId,
+          commandName: command.name,
+          body: {
+            userId: context.userId,
+            chatId: context.chatId
+          }
+        });
+
+        return formatTransactionDeleteRequested(result);
+      }
+      case "confirm_delete_transaction": {
+        const result = await this.apiClient.request({
+          method: "POST",
+          path: `/transactions/${command.transactionId}/delete-confirm`,
+          correlationId: context.correlationId,
+          commandName: command.name,
+          body: {
+            userId: context.userId,
+            chatId: context.chatId
+          }
+        });
+
+        return result.status === "completed"
+          ? formatTransactionDeleted(result)
+          : result.message;
+      }
+      case "transaction_detail": {
+        const result = await this.apiClient.request({
+          method: "GET",
+          path: `/transactions/${command.transactionId}`,
+          correlationId: context.correlationId,
+          commandName: command.name,
+          query: {
+            userId: context.userId,
+            chatId: context.chatId
+          }
+        });
+
+        return formatTransactionDetail(result);
       }
       case "summary": {
         const result = await this.apiClient.request({
@@ -132,6 +205,8 @@ class WhatsAppMessageController {
             userId: context.userId,
             period: command.filter.period,
             category: command.filter.category,
+            fromDateKey: command.filter.fromDateKey,
+            toDateKey: command.filter.toDateKey,
             limit: 10
           }
         });
@@ -210,7 +285,7 @@ class WhatsAppMessageController {
           "Aku belum paham format pesan itu 🙏",
           "Coba pakai salah satu format di bawah ya:",
           "",
-          buildHelpMessage()
+          buildHelpMessage({ isAdmin })
         ].join("\n");
     }
   }
@@ -229,9 +304,18 @@ class WhatsAppMessageController {
 
     return formatResetResponse(result);
   }
+
+  isAdminUser(userId) {
+    const normalizedUserId = String(userId || "").replace(/[^\d]/g, "").trim();
+    return this.adminUserIds.has(normalizedUserId);
+  }
 }
 
 function buildHistoryTitle(filter = {}) {
+  if (filter.fromDateKey && filter.toDateKey) {
+    return `Riwayat ${filter.fromDateKey} sampai ${filter.toDateKey}`;
+  }
+
   if (filter.period === "today") {
     return "Riwayat hari ini";
   }

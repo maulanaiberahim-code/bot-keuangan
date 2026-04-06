@@ -33,6 +33,71 @@ function createFinanceController(context) {
       }
     },
 
+    getTransactionDetail: async (req, res, next) => {
+      try {
+        const result = await financeService.getTransactionDetail({
+          ...req.query,
+          transactionId: req.params.transactionId
+        });
+
+        return sendSuccess(res, { data: result });
+      } catch (error) {
+        return next(error);
+      }
+    },
+
+    requestTransactionDeletion: async (req, res, next) => {
+      try {
+        const result = await financeService.requestTransactionDeletion({
+          ...req.body,
+          transactionId: req.params.transactionId
+        });
+
+        return sendSuccess(res, { data: result });
+      } catch (error) {
+        return next(error);
+      }
+    },
+
+    confirmTransactionDeletion: async (req, res, next) => {
+      try {
+        const result = await financeService.confirmTransactionDeletion({
+          ...req.body,
+          transactionId: req.params.transactionId
+        });
+
+        return sendSuccess(res, { data: result });
+      } catch (error) {
+        return next(error);
+      }
+    },
+
+    updateTransaction: async (req, res, next) => {
+      try {
+        const result = await financeService.updateTransaction({
+          ...req.body,
+          transactionId: req.params.transactionId
+        });
+
+        return sendSuccess(res, { data: result });
+      } catch (error) {
+        return next(error);
+      }
+    },
+
+    deleteTransaction: async (req, res, next) => {
+      try {
+        const result = await financeService.deleteTransaction({
+          ...req.query,
+          transactionId: req.params.transactionId
+        });
+
+        return sendSuccess(res, { data: result });
+      } catch (error) {
+        return next(error);
+      }
+    },
+
     getSummary: async (req, res, next) => {
       try {
         const result = await financeService.getSummary(req.query);

@@ -8,11 +8,15 @@ const {
   categoryBreakdownQuerySchema,
   chartQuerySchema,
   createTransactionBodySchema,
+  deleteTransactionQuerySchema,
   exportQuerySchema,
   listTransactionsQuerySchema,
   monthlyReportQuerySchema,
   resetBodySchema,
-  summaryQuerySchema
+  summaryQuerySchema,
+  transactionActionBodySchema,
+  transactionParamsSchema,
+  updateTransactionBodySchema
 } = require("../schemas/financeSchemas");
 
 function createApiRouter(context) {
@@ -31,6 +35,51 @@ function createApiRouter(context) {
     "/transactions",
     validateRequest({ query: listTransactionsQuerySchema }),
     financeController.getTransactions
+  );
+
+  router.get(
+    "/transactions/:transactionId",
+    validateRequest({
+      params: transactionParamsSchema,
+      query: deleteTransactionQuerySchema
+    }),
+    financeController.getTransactionDetail
+  );
+
+  router.post(
+    "/transactions/:transactionId/delete-request",
+    validateRequest({
+      params: transactionParamsSchema,
+      body: transactionActionBodySchema
+    }),
+    financeController.requestTransactionDeletion
+  );
+
+  router.post(
+    "/transactions/:transactionId/delete-confirm",
+    validateRequest({
+      params: transactionParamsSchema,
+      body: transactionActionBodySchema
+    }),
+    financeController.confirmTransactionDeletion
+  );
+
+  router.patch(
+    "/transactions/:transactionId",
+    validateRequest({
+      params: transactionParamsSchema,
+      body: updateTransactionBodySchema
+    }),
+    financeController.updateTransaction
+  );
+
+  router.delete(
+    "/transactions/:transactionId",
+    validateRequest({
+      params: transactionParamsSchema,
+      query: deleteTransactionQuerySchema
+    }),
+    financeController.deleteTransaction
   );
 
   router.get(
