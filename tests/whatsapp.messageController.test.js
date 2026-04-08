@@ -87,6 +87,29 @@ describe("WhatsApp message controller", () => {
     }));
   });
 
+  test("transaksi WhatsApp tanpa tanggal tidak mengirim null ke API", async () => {
+    const { apiClient, controller } = createController();
+
+    await controller.handle({
+      text: "masuk 500 gaji",
+      userId: "628111",
+      chatId: "chat-1",
+      correlationId: "corr-1b",
+      messageId: "msg-1b"
+    });
+
+    expect(apiClient.request).toHaveBeenCalledWith(expect.objectContaining({
+      method: "POST",
+      path: "/transactions",
+      body: expect.objectContaining({
+        type: "income",
+        amount: "500",
+        category: "gaji",
+        transactionDate: undefined
+      })
+    }));
+  });
+
   test("riwayat rentang tanggal diteruskan ke API", async () => {
     const { apiClient, controller } = createController();
     apiClient.request.mockResolvedValueOnce([]);

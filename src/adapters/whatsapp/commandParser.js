@@ -1,4 +1,5 @@
 const { isValidDayKey, isValidMonthKey } = require("../../utils/dateHelper");
+const { parseAmount } = require("../../utils/amount");
 
 function parseCommand(text) {
   const trimmed = String(text || "").trim();
@@ -107,35 +108,59 @@ function parseCommand(text) {
     return { name: "admin_active_users", month: adminActiveUsersMonthMatch[1] };
   }
 
-  const incomeMatch = normalized.match(/^masuk\s+([0-9.,]+)\s+(.+?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  const incomeMatch = normalized.match(/^masuk\s+(.+)$/i);
   if (incomeMatch) {
+    const parsedPayload = parseTransactionPayload(incomeMatch[1]);
+
+    if (!parsedPayload) {
+      return {
+        name: "unknown"
+      };
+    }
+
     return {
       name: "income",
-      amount: incomeMatch[1],
-      category: incomeMatch[2].trim(),
-      transactionDate: incomeMatch[3] || null
+      amount: parsedPayload.amount,
+      category: parsedPayload.category,
+      transactionDate: parsedPayload.transactionDate
     };
   }
 
-  const expenseMatch = normalized.match(/^keluar\s+([0-9.,]+)\s+(.+?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  const expenseMatch = normalized.match(/^keluar\s+(.+)$/i);
   if (expenseMatch) {
+    const parsedPayload = parseTransactionPayload(expenseMatch[1]);
+
+    if (!parsedPayload) {
+      return {
+        name: "unknown"
+      };
+    }
+
     return {
       name: "expense",
-      amount: expenseMatch[1],
-      category: expenseMatch[2].trim(),
-      transactionDate: expenseMatch[3] || null
+      amount: parsedPayload.amount,
+      category: parsedPayload.category,
+      transactionDate: parsedPayload.transactionDate
     };
   }
 
-  const updateMatch = normalized.match(/^ubah(?: transaksi)?\s+(\S+)\s+(masuk|keluar)\s+([0-9.,]+)\s+(.+?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
+  const updateMatch = normalized.match(/^ubah(?: transaksi)?\s+(\S+)\s+(masuk|keluar)\s+(.+)$/i);
   if (updateMatch) {
+    const parsedPayload = parseTransactionPayload(updateMatch[3]);
+
+    if (!parsedPayload) {
+      return {
+        name: "unknown"
+      };
+    }
+
     return {
       name: "update_transaction",
       transactionId: updateMatch[1],
       type: updateMatch[2].toLowerCase() === "masuk" ? "income" : "expense",
-      amount: updateMatch[3],
-      category: updateMatch[4].trim(),
-      transactionDate: updateMatch[5] || undefined
+      amount: parsedPayload.amount,
+      category: parsedPayload.category,
+      transactionDate: parsedPayload.transactionDate
     };
   }
 
@@ -158,6 +183,37 @@ function parseCommand(text) {
   return {
     name: "unknown"
   };
+}
+
+function parseTransactionPayload(payload) {
+  const payloadMatch = String(payload || "").trim().match(/^(.*?)(?:\s+tanggal\s+(\d{4}-\d{2}-\d{2}))?$/i);
+
+  if (!payloadMatch) {
+    return null;
+  }
+
+  const payloadWithoutDate = payloadMatch[1].trim();
+  const transactionDate = payloadMatch[2] || undefined;
+  const parts = payloadWithoutDate.split(" ").filter(Boolean);
+
+  if (parts.length < 2) {
+    return null;
+  }
+
+  for (let index = parts.length - 1; index >= 1; index -= 1) {
+    const amount = parts.slice(0, index).join(" ");
+    const category = parts.slice(index).join(" ").trim();
+
+    if (Number.isFinite(parseAmount(amount)) && category) {
+      return {
+        amount,
+        category,
+        transactionDate
+      };
+    }
+  }
+
+  return null;
 }
 
 module.exports = {

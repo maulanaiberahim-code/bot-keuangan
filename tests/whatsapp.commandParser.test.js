@@ -15,7 +15,25 @@ describe("WhatsApp command parser", () => {
       name: "expense",
       amount: "20000",
       category: "makan",
-      transactionDate: null
+      transactionDate: undefined
+    });
+  });
+
+  test("mendukung nominal dengan suffix chat yang umum", () => {
+    expect(parseCommand("masuk 200 ribu saham")).toEqual({
+      name: "income",
+      amount: "200 ribu",
+      category: "saham",
+      transactionDate: undefined
+    });
+  });
+
+  test("mendukung nominal dengan separator ribuan", () => {
+    expect(parseCommand("masuk 2.000.000 saham")).toEqual({
+      name: "income",
+      amount: "2.000.000",
+      category: "saham",
+      transactionDate: undefined
     });
   });
 

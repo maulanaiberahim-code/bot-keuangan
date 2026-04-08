@@ -84,6 +84,29 @@ describe("CoreFinanceService", () => {
     expect(transactionRepository.balanceQueryCount).toBe(0);
   });
 
+  test("menerima nominal string dengan suffix chat yang umum", async () => {
+    const context = createAppContext({
+      logger: createNoopLogger(),
+      serviceName: "test",
+      userRepository: new InMemoryUserRepository(),
+      transactionRepository: new InMemoryTransactionRepository(),
+      deliveryJobRepository: new InMemoryDeliveryJobRepository()
+    });
+
+    const service = context.services.coreFinanceService;
+    const result = await service.createTransaction({
+      userId: "628111",
+      type: "income",
+      amount: "200 ribu",
+      category: "saham",
+      source: "api",
+      idempotencyKey: "income-2b"
+    });
+
+    expect(result.transaction.amount).toBe(200000);
+    expect(result.balance).toBe(200000);
+  });
+
   test("menolak filter riwayat dengan tanggal awal setelah tanggal akhir", async () => {
     const context = createAppContext({
       logger: createNoopLogger(),
